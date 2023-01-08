@@ -1,0 +1,26 @@
+[package]
+name    = "esp32c3-fan-temperature-controller"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+embedded-hal   = { version = "0.2.7"}
+embedded-hal-1 = { package = "embedded-hal", version = "=1.0.0-alpha.8" }
+r0             = "1.0.0"
+riscv          = "0.10.0"
+riscv-rt       = { version = "0.10.0", optional = true }
+esp-backtrace  = { version = "0.4.0", features = ["esp32c3", "panic-handler", "exception-handler", "print-uart"] }
+esp-println    = { version = "0.3.0", features = ["esp32c3"] }
+
+[dependencies.esp-hal-common]
+git      = "https://github.com/esp-rs/esp-hal.git"
+features = ["esp32c3"]
+
+
+[dependencies.esp32c3-hal]
+git = "https://github.com/esp-rs/esp-hal.git"
+
+[dev-dependencies]
+
+[features]
+default = ["riscv-rt"]
