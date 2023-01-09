@@ -12,6 +12,9 @@ riscv-rt       = { version = "0.10.0", optional = true }
 esp-backtrace  = { version = "0.4.0", features = ["esp32c3", "panic-handler", "exception-handler", "print-uart"] }
 esp-println    = { version = "0.3.0", features = ["esp32c3"] }
 
+[dependencies.aht10]
+path = "../../aht10"
+
 [dependencies.esp-hal-common]
 git      = "https://github.com/esp-rs/esp-hal.git"
 features = ["esp32c3"]

@@ -1,6 +1,6 @@
 ## ESP32-c3 Fan Temperature Controller
 
-This is a simple repo that uses a DHT22 temperature sensor to control the speed of two 4-pin fans via their PWM control pins. It checks the measured temperature on the DHT22 against a range specified in the code and linearly maps the fans from off to full speed based on where the temperature falls within (or outside) of that range.
+This is a simple repo that uses a AHT10 i2c temperature sensor to control the speed of two 4-pin fans via their PWM control pins. It checks the measured temperature on the AHT10 against a range specified in the code and linearly maps the fans from off to full speed based on where the temperature falls within (or outside) of that range.
 
 ### Flashing / Setup Instructions:
 
