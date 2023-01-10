@@ -50,7 +50,8 @@ const MAX_FAN_TEMP: f32 = 35.0; // 95 F
 
 #[entry]
 fn main() -> ! {
-    let peripherals = Peripherals::take().unwrap();
+    let peripherals =
+        Peripherals::take().expect("Your chip is probably borked: program will now crash.");
     let mut system = peripherals.SYSTEM.split();
     let clocks = ClockControl::boot_defaults(system.clock_control).freeze();
 
@@ -64,7 +65,7 @@ fn main() -> ! {
 
     rtc.swd.disable();
     rtc.rwdt.disable();
-    wdt0.disable();
+    wdt0.start(30_u64.secs());
     wdt1.disable();
 
     let io = IO::new(peripherals.GPIO, peripherals.IO_MUX);
@@ -93,7 +94,7 @@ fn main() -> ! {
             clock_source: timer::LSClockSource::APBClk,
             frequency: 25u32.kHz(),
         })
-        .unwrap();
+        .expect("Unable to configure PWM Timer: program will now crash.");
 
     let mut pwm_channel_0 = ledc.get_channel(channel::Number::Channel0, led_pwm_pin_1);
     let mut pwm_channel_1 = ledc.get_channel(channel::Number::Channel1, led_pwm_pin_2);
@@ -125,46 +126,29 @@ fn main() -> ! {
         &mut system.peripheral_clock_control,
         &clocks,
     )
-    .unwrap();
+    .expect("Unable to initialize I2C peripheral: program will now crash.");
 
     // Set up the AHT10:
-    let temp_sensor_setup_result = AHT10::new(aht10_i2c, temp_sensor_delay);
-    let mut temp_sensor = match temp_sensor_setup_result {
-        Ok(_) => temp_sensor_setup_result.unwrap(),
-        Err(_) => {
-            println!("Error initializing the temp_sensor: program will now crash.");
-            temp_sensor_setup_result.unwrap()
-        }
-    };
+    let mut temp_sensor = AHT10::new(aht10_i2c, temp_sensor_delay)
+        .expect("Error initializing the temp_sensor: program will now crash.");
 
     loop {
-        let (h, t) = temp_sensor.read().unwrap();
+        wdt0.feed();
+        let (h, t) = temp_sensor
+            .read()
+            .expect("Unable to read temperature: program will now crash.");
         println!("Temperature: {:?}C, Humidity: {:?}%", t.celsius(), h.rh());
-        if t.celsius() <= MIN_FAN_TEMP {
-            // Any temp at or below MIN_FAN_TEMP, fan_speed = 1
-            fan_speed = 1;
-        } else if t.celsius() >= MAX_FAN_TEMP {
-            // Any temp at or above MAX_FAN_TEMP, fan_speed = 100
-            fan_speed = 100;
-        } else {
-            // When the temp is in the range, do a map to get the fan speed:
-            let map_value = map(t.celsius(), MIN_FAN_TEMP, MAX_FAN_TEMP, 1.1, 99.9);
-            fan_speed = map_value as u8;
-        }
+        fan_speed = match t.celsius() {
+            t if t <= MIN_FAN_TEMP => 1,
+            t if t >= MAX_FAN_TEMP => 100,
+            t => map(t, MIN_FAN_TEMP, MAX_FAN_TEMP, 1.1, 99.9) as u8,
+        };
+
         println!("Fan Speed Set To {:?}%", fan_speed);
         // Set fan PWM channels to fan_speed:
-        pwm_channel_0
-            .configure(channel::config::Config {
-                timer: &(pwm_timer),
-                duty_pct: fan_speed,
-            })
-            .unwrap();
-        pwm_channel_1
-            .configure(channel::config::Config {
-                timer: &(pwm_timer),
-                duty_pct: fan_speed,
-            })
-            .unwrap();
+        pwm_channel_0.set_duty(fan_speed).ok();
+        pwm_channel_1.set_duty(fan_speed).ok();
+
         delay.delay_ms(10_000_u32);
     }
 }
