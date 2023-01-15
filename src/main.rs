@@ -38,6 +38,8 @@ use esp32c3_hal::{
     Delay, Rtc, IO,
 };
 use esp_backtrace as _;
+use esp_hal_common::clock::CpuClock;
+use esp_hal_common::ledc::channel::ChannelHW;
 use esp_hal_common::ledc::*;
 use esp_println::println;
 use riscv_rt::entry;
@@ -53,7 +55,7 @@ fn main() -> ! {
     let peripherals =
         Peripherals::take().expect("Your chip is probably borked: program will now crash.");
     let mut system = peripherals.SYSTEM.split();
-    let clocks = ClockControl::boot_defaults(system.clock_control).freeze();
+    let clocks = ClockControl::configure(system.clock_control, CpuClock::Clock160MHz).freeze();
 
     // Disable the watchdog timers. For the ESP32-C3, this includes the Super WDT,
     // the RTC WDT, and the TIMG WDTs.
@@ -147,7 +149,9 @@ fn main() -> ! {
         println!("Fan Speed Set To {:?}%", fan_speed);
         // Set fan PWM channels to fan_speed:
         pwm_channel_0.set_duty(fan_speed).ok();
+        pwm_channel_0.configure_hw().ok();
         pwm_channel_1.set_duty(fan_speed).ok();
+        pwm_channel_1.configure_hw().ok();
 
         delay.delay_ms(10_000_u32);
     }
