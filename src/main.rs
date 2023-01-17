@@ -31,6 +31,7 @@
 #![no_main]
 
 use aht10::AHT10;
+use channel::config::Config as ChannelConfig;
 use esp32c3_hal::ledc::channel::ChannelIFace;
 use esp32c3_hal::ledc::timer::TimerIFace;
 use esp32c3_hal::{
@@ -39,10 +40,10 @@ use esp32c3_hal::{
 };
 use esp_backtrace as _;
 use esp_hal_common::clock::CpuClock;
-use esp_hal_common::ledc::channel::ChannelHW;
 use esp_hal_common::ledc::*;
 use esp_println::println;
 use riscv_rt::entry;
+use timer::config::Config as TimerConfig;
 
 // Lowest temp reading for fans to spin up:
 const MIN_FAN_TEMP: f32 = 25.0; // 77 F
@@ -91,30 +92,26 @@ fn main() -> ! {
 
     let mut pwm_timer = ledc.get_timer::<LowSpeed>(timer::Number::Timer2);
     pwm_timer
-        .configure(timer::config::Config {
+        .configure(TimerConfig {
             duty: timer::config::Duty::Duty8Bit,
             clock_source: timer::LSClockSource::APBClk,
             frequency: 25u32.kHz(),
         })
-        .expect("Unable to configure PWM Timer: program will now crash.");
+        .expect(PWM_TIMER_CONFIG_ERROR);
 
     let mut pwm_channel_0 = ledc.get_channel(channel::Number::Channel0, led_pwm_pin_1);
     let mut pwm_channel_1 = ledc.get_channel(channel::Number::Channel1, led_pwm_pin_2);
 
     // Set both fan PWM channels to 1% duty cycle by default:
-    let mut fan_speed = 1;
-    pwm_channel_0
-        .configure(channel::config::Config {
-            timer: &(pwm_timer),
-            duty_pct: fan_speed,
-        })
-        .ok();
-    pwm_channel_1
-        .configure(channel::config::Config {
-            timer: &(pwm_timer),
-            duty_pct: fan_speed,
-        })
-        .ok();
+    let mut fan_speed = 10;
+
+    let pwm_config = |fan_speed| ChannelConfig {
+        timer: &(pwm_timer),
+        duty_pct: fan_speed,
+    };
+
+    pwm_channel_0.configure(pwm_config(fan_speed)).ok();
+    pwm_channel_1.configure(pwm_config(fan_speed)).ok();
 
     // Set up a delay for use in reading the AHT10 data:
     let temp_sensor_delay = Delay::new(&clocks);
@@ -128,17 +125,14 @@ fn main() -> ! {
         &mut system.peripheral_clock_control,
         &clocks,
     )
-    .expect("Unable to initialize I2C peripheral: program will now crash.");
+    .expect(I2C_INIT_ERROR);
 
     // Set up the AHT10:
-    let mut temp_sensor = AHT10::new(aht10_i2c, temp_sensor_delay)
-        .expect("Error initializing the temp_sensor: program will now crash.");
+    let mut temp_sensor = AHT10::new(aht10_i2c, temp_sensor_delay).expect(TEMP_SENSOR_INIT_ERROR);
 
     loop {
         wdt0.feed();
-        let (h, t) = temp_sensor
-            .read()
-            .expect("Unable to read temperature: program will now crash.");
+        let (h, t) = temp_sensor.read().expect(TEMP_SENSOR_ERROR);
         println!("Temperature: {:?}C, Humidity: {:?}%", t.celsius(), h.rh());
         fan_speed = match t.celsius() {
             t if t <= MIN_FAN_TEMP => 1,
@@ -148,10 +142,8 @@ fn main() -> ! {
 
         println!("Fan Speed Set To {:?}%", fan_speed);
         // Set fan PWM channels to fan_speed:
-        pwm_channel_0.set_duty(fan_speed).ok();
-        pwm_channel_0.configure_hw().ok();
-        pwm_channel_1.set_duty(fan_speed).ok();
-        pwm_channel_1.configure_hw().ok();
+        pwm_channel_0.configure(pwm_config(fan_speed)).ok();
+        pwm_channel_1.configure(pwm_config(fan_speed)).ok();
 
         delay.delay_ms(10_000_u32);
     }
@@ -160,3 +152,8 @@ fn main() -> ! {
 fn map(x: f32, in_min: f32, in_max: f32, out_min: f32, out_max: f32) -> f32 {
     (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min
 }
+
+static TEMP_SENSOR_ERROR: &str = "Unable to read temperature: program will now crash.";
+static TEMP_SENSOR_INIT_ERROR: &str = "Error initializing the temp_sensor: program will now crash.";
+static I2C_INIT_ERROR: &str = "Unable to initialize I2C peripheral: program will now crash.";
+static PWM_TIMER_CONFIG_ERROR: &str = "Unable to configure PWM Timer: program will now crash.";
