@@ -32,6 +32,12 @@
 
 use aht10::AHT10;
 use channel::config::Config as ChannelConfig;
+use embedded_graphics::{
+    mono_font::{ascii::FONT_6X10, MonoTextStyleBuilder},
+    pixelcolor::BinaryColor,
+    prelude::*,
+    text::{Baseline, Text},
+};
 use esp32c3_hal::ledc::channel::ChannelIFace;
 use esp32c3_hal::ledc::timer::TimerIFace;
 use esp32c3_hal::{
@@ -43,6 +49,7 @@ use esp_hal_common::clock::CpuClock;
 use esp_hal_common::ledc::*;
 use esp_println::println;
 use riscv_rt::entry;
+use ssd1306::{prelude::*, I2CDisplayInterface, Ssd1306};
 use timer::config::Config as TimerConfig;
 
 // Lowest temp reading for fans to spin up:
@@ -116,8 +123,8 @@ fn main() -> ! {
     // Set up a delay for use in reading the AHT10 data:
     let temp_sensor_delay = Delay::new(&clocks);
 
-    // Set up the AHT10 i2c interface: SCL on pin 2, SDA on pin 3:
-    let aht10_i2c = i2c::I2C::new(
+    // Set up the i2c interface: SCL on pin 2, SDA on pin 3:
+    let i2c = i2c::I2C::new(
         peripherals.I2C0,
         io.pins.gpio3,
         io.pins.gpio2,
@@ -128,17 +135,38 @@ fn main() -> ! {
     .expect(I2C_INIT_ERROR);
 
     // Set up the AHT10:
-    let mut temp_sensor = AHT10::new(aht10_i2c, temp_sensor_delay).expect(TEMP_SENSOR_INIT_ERROR);
+    let mut temp_sensor = AHT10::new(i2c, temp_sensor_delay).expect(TEMP_SENSOR_INIT_ERROR);
+    let (h, t) = temp_sensor.read().expect(TEMP_SENSOR_ERROR);
+    println!("Temperature: {:?}C, Humidity: {:?}%", t.celsius(), h.rh());
+    fan_speed = match t.celsius() {
+        t if t <= MIN_FAN_TEMP => 1,
+        t if t >= MAX_FAN_TEMP => 100,
+        t => map(t, MIN_FAN_TEMP, MAX_FAN_TEMP, 1.1, 99.9) as u8,
+    };
+
+    // Set up the SSD1306:
+    let interface = I2CDisplayInterface::new(i2c);
+    let mut oled_display = Ssd1306::new(interface, DisplaySize128x64, DisplayRotation::Rotate0)
+        .into_buffered_graphics_mode();
+    oled_display.init().unwrap();
+
+    let text_style = MonoTextStyleBuilder::new()
+        .font(&FONT_6X10)
+        .text_color(BinaryColor::On)
+        .build();
+
+    Text::with_baseline("Hello world!", Point::zero(), text_style, Baseline::Top)
+        .draw(&mut oled_display)
+        .unwrap();
+
+    Text::with_baseline("Hello Rust!", Point::new(0, 16), text_style, Baseline::Top)
+        .draw(&mut oled_display)
+        .unwrap();
+
+    oled_display.flush().unwrap();
 
     loop {
         wdt0.feed();
-        let (h, t) = temp_sensor.read().expect(TEMP_SENSOR_ERROR);
-        println!("Temperature: {:?}C, Humidity: {:?}%", t.celsius(), h.rh());
-        fan_speed = match t.celsius() {
-            t if t <= MIN_FAN_TEMP => 1,
-            t if t >= MAX_FAN_TEMP => 100,
-            t => map(t, MIN_FAN_TEMP, MAX_FAN_TEMP, 1.1, 99.9) as u8,
-        };
 
         println!("Fan Speed Set To {:?}%", fan_speed);
         // Set fan PWM channels to fan_speed:
