@@ -186,6 +186,10 @@ fn main() -> ! {
     let print_string_line_1 =
         show(&mut buffer_line_1, format_args!("T: {:?}C", t_celsius)).unwrap();
 
+    let mut buffer_line_2 = [0_u8; 20];
+    let print_string_line_2 =
+        show(&mut buffer_line_2, format_args!("FS: {:?}%", fan_speed)).unwrap();
+
     loop {
         wdt0.feed();
 
@@ -206,6 +210,14 @@ fn main() -> ! {
                 t => map(t, MIN_FAN_TEMP, MAX_FAN_TEMP, 1.1, 99.9) as u8,
             };
         }
+
+        let mut buffer_line_1 = [0_u8; 20];
+        let print_string_line_1 =
+            show(&mut buffer_line_1, format_args!("T: {:.2}C", t_celsius)).unwrap();
+
+        let mut buffer_line_2 = [0_u8; 20];
+        let print_string_line_2 =
+            show(&mut buffer_line_2, format_args!("FS: {:?}%", fan_speed)).unwrap();
 
         // Print to Screen:
         // write_to_oled("test_1", "test_2");
@@ -232,7 +244,7 @@ fn main() -> ! {
             .unwrap();
 
             Text::with_baseline(
-                print_string_line_1,
+                print_string_line_2,
                 Point::new(0, 16),
                 text_style,
                 Baseline::Top,
