@@ -114,16 +114,16 @@ fn main() -> ! {
     let mut pwm_channel_0 = ledc.get_channel(channel::Number::Channel0, led_pwm_pin_1);
     let mut pwm_channel_1 = ledc.get_channel(channel::Number::Channel1, led_pwm_pin_2);
 
-    // Set both fan PWM channels to 1% duty cycle by default:
-    let mut fan_speed = 10;
+    // Set both fan PWM channels to 10% duty cycle by default:
+    let initial_fan_speed = 10;
 
     let pwm_config = |fan_speed| ChannelConfig {
         timer: &(pwm_timer),
         duty_pct: fan_speed,
     };
 
-    pwm_channel_0.configure(pwm_config(fan_speed)).ok();
-    pwm_channel_1.configure(pwm_config(fan_speed)).ok();
+    pwm_channel_0.configure(pwm_config(initial_fan_speed)).ok();
+    pwm_channel_1.configure(pwm_config(initial_fan_speed)).ok();
 
     // Set up a delay for use in reading the AHT10 data:
     let mut temp_sensor_delay = Delay::new(&clocks);
@@ -139,136 +139,83 @@ fn main() -> ! {
     )
     .expect(I2C_INIT_ERROR);
 
-    // Set up the SSD1306:
-    {
-        let temp_i2c_struct = TempStructForI2cBorrowAvoidance { i2c_bit: &mut i2c };
-        let interface = I2CDisplayInterface::new(temp_i2c_struct);
-        let mut oled_display = Ssd1306::new(interface, DisplaySize128x32, DisplayRotation::Rotate0)
-            .into_buffered_graphics_mode();
-        oled_display.init().unwrap();
-
-        let text_style = MonoTextStyleBuilder::new()
-            .font(&FONT_9X15)
-            .text_color(BinaryColor::On)
-            .build();
-
-        Text::with_baseline("Hello Wordl!", Point::zero(), text_style, Baseline::Top)
-            .draw(&mut oled_display)
-            .unwrap();
-
-        Text::with_baseline("Hello_Rust!", Point::new(0, 16), text_style, Baseline::Top)
-            .draw(&mut oled_display)
-            .unwrap();
-
-        oled_display.flush().unwrap();
-    }
-
-    let mut t_celsius: f32 = 0.0;
-
-    {
-        let temp_i2c_struct = TempStructForI2cBorrowAvoidance { i2c_bit: &mut i2c };
-        let temp_delay_struct = TempStructForDelayBorrowAvoidance {
-            delay_bit: &mut temp_sensor_delay,
-        };
-        let mut temp_sensor =
-            AHT10::new(temp_i2c_struct, temp_delay_struct).expect(TEMP_SENSOR_INIT_ERROR);
-        let (h, t) = temp_sensor.read().expect(TEMP_SENSOR_ERROR);
-        println!("Temperature: {:?}C, Humidity: {:?}%", t.celsius(), h.rh());
-        t_celsius = t.celsius();
-        fan_speed = match t.celsius() {
-            t if t <= MIN_FAN_TEMP => 1,
-            t if t >= MAX_FAN_TEMP => 100,
-            t => map(t, MIN_FAN_TEMP, MAX_FAN_TEMP, 1.1, 99.9) as u8,
-        };
-    }
-
-    let mut buffer_line_1 = [0_u8; 20];
-    let print_string_line_1 =
-        show(&mut buffer_line_1, format_args!("T: {:?}C", t_celsius)).unwrap();
-
-    let mut buffer_line_2 = [0_u8; 20];
-    let print_string_line_2 =
-        show(&mut buffer_line_2, format_args!("FS: {:?}%", fan_speed)).unwrap();
-
     loop {
         wdt0.feed();
 
         // Read Temps:
-        {
-            let temp_i2c_struct = TempStructForI2cBorrowAvoidance { i2c_bit: &mut i2c };
-            let temp_delay_struct = TempStructForDelayBorrowAvoidance {
-                delay_bit: &mut temp_sensor_delay,
-            };
-            let mut temp_sensor =
-                AHT10::new(temp_i2c_struct, temp_delay_struct).expect(TEMP_SENSOR_INIT_ERROR);
-            let (h, t) = temp_sensor.read().expect(TEMP_SENSOR_ERROR);
-            println!("Temperature: {:?}C, Humidity: {:?}%", t.celsius(), h.rh());
-            t_celsius = t.celsius();
-            fan_speed = match t.celsius() {
-                t if t <= MIN_FAN_TEMP => 1,
-                t if t >= MAX_FAN_TEMP => 100,
-                t => map(t, MIN_FAN_TEMP, MAX_FAN_TEMP, 1.1, 99.9) as u8,
-            };
-        }
-
-        let mut buffer_line_1 = [0_u8; 20];
-        let print_string_line_1 =
-            show(&mut buffer_line_1, format_args!("T: {:.2}C", t_celsius)).unwrap();
-
-        let mut buffer_line_2 = [0_u8; 20];
-        let print_string_line_2 =
-            show(&mut buffer_line_2, format_args!("FS: {:?}%", fan_speed)).unwrap();
+        let (t, fs) = read_temp(
+            I2cShare::new(&mut i2c),
+            DelayShare::new(&mut temp_sensor_delay),
+        );
 
         // Print to Screen:
-        // write_to_oled("test_1", "test_2");
+        let mut buffer_line_1 = [0_u8; 20];
+        let mut buffer_line_2 = [0_u8; 20];
+        let print_string_line_1 = show(&mut buffer_line_1, format_args!("T: {:.2}C", t)).unwrap();
+        let print_string_line_2 = show(&mut buffer_line_2, format_args!("FS: {:?}%", fs)).unwrap();
+
         {
-            let temp_i2c_struct = TempStructForI2cBorrowAvoidance { i2c_bit: &mut i2c };
-            let interface = I2CDisplayInterface::new(temp_i2c_struct);
-            let mut oled_display =
-                Ssd1306::new(interface, DisplaySize128x32, DisplayRotation::Rotate0)
-                    .into_buffered_graphics_mode();
-            oled_display.init().unwrap();
-
-            let text_style = MonoTextStyleBuilder::new()
-                .font(&FONT_9X15)
-                .text_color(BinaryColor::On)
-                .build();
-
-            Text::with_baseline(
+            oled_write(
+                I2cShare::new(&mut i2c),
                 print_string_line_1,
-                Point::zero(),
-                text_style,
-                Baseline::Top,
-            )
-            .draw(&mut oled_display)
-            .unwrap();
-
-            Text::with_baseline(
                 print_string_line_2,
-                Point::new(0, 16),
-                text_style,
-                Baseline::Top,
-            )
-            .draw(&mut oled_display)
-            .unwrap();
-
-            oled_display.flush().unwrap();
+            );
         }
 
-        println!("Fan Speed Set To {:?}%", fan_speed);
         // Set fan PWM channels to fan_speed:
-        pwm_channel_0.configure(pwm_config(fan_speed)).ok();
-        pwm_channel_1.configure(pwm_config(fan_speed)).ok();
+        pwm_channel_0.configure(pwm_config(fs)).ok();
+        pwm_channel_1.configure(pwm_config(fs)).ok();
 
         delay.delay_ms(10_000_u32);
     }
 }
 
-struct TempStructForI2cBorrowAvoidance<'a> {
+fn oled_write<'a, 'b>(i2c_share: I2cShare<'a>, line_1_str: &'b str, line_2_str: &'b str) {
+    let interface = I2CDisplayInterface::new(i2c_share);
+    let mut oled_display = Ssd1306::new(interface, DisplaySize128x32, DisplayRotation::Rotate0)
+        .into_buffered_graphics_mode();
+    oled_display.init().unwrap();
+
+    let text_style = MonoTextStyleBuilder::new()
+        .font(&FONT_9X15)
+        .text_color(BinaryColor::On)
+        .build();
+
+    Text::with_baseline(line_1_str, Point::zero(), text_style, Baseline::Top)
+        .draw(&mut oled_display)
+        .unwrap();
+
+    Text::with_baseline(line_2_str, Point::new(0, 16), text_style, Baseline::Top)
+        .draw(&mut oled_display)
+        .unwrap();
+
+    oled_display.flush().unwrap();
+}
+
+fn read_temp(i2c_share: I2cShare, delay_share: DelayShare) -> (f32, u8) {
+    let mut temp_sensor = AHT10::new(i2c_share, delay_share).expect(TEMP_SENSOR_INIT_ERROR);
+    let (h, t) = temp_sensor.read().expect(TEMP_SENSOR_ERROR);
+    println!("Temperature: {:?}C, Humidity: {:?}%", t.celsius(), h.rh());
+    let t_celsius = t.celsius();
+    let fan_speed = match t.celsius() {
+        t if t <= MIN_FAN_TEMP => 1,
+        t if t >= MAX_FAN_TEMP => 100,
+        t => map(t, MIN_FAN_TEMP, MAX_FAN_TEMP, 1.1, 99.9) as u8,
+    };
+    (t_celsius, fan_speed)
+}
+
+struct I2cShare<'a> {
     i2c_bit: &'a mut esp_hal_common::i2c::I2C<I2C0>,
 }
 
-impl<'a> embedded_hal::blocking::i2c::Write for TempStructForI2cBorrowAvoidance<'a> {
+impl<'a> I2cShare<'a> {
+    fn new(i2c_bit: &'a mut esp32c3_hal::i2c::I2C<I2C0>) -> Self {
+        Self { i2c_bit }
+    }
+}
+
+impl<'a> embedded_hal::blocking::i2c::Write for I2cShare<'a> {
     type Error = esp32c3_hal::i2c::Error;
 
     fn write(&mut self, address: SevenBitAddress, bytes: &[u8]) -> Result<(), Self::Error> {
@@ -276,7 +223,7 @@ impl<'a> embedded_hal::blocking::i2c::Write for TempStructForI2cBorrowAvoidance<
     }
 }
 
-impl<'a> embedded_hal::blocking::i2c::Read for TempStructForI2cBorrowAvoidance<'a> {
+impl<'a> embedded_hal::blocking::i2c::Read for I2cShare<'a> {
     type Error = esp32c3_hal::i2c::Error;
 
     fn read(&mut self, address: SevenBitAddress, buffer: &mut [u8]) -> Result<(), Self::Error> {
@@ -284,7 +231,7 @@ impl<'a> embedded_hal::blocking::i2c::Read for TempStructForI2cBorrowAvoidance<'
     }
 }
 
-impl<'a> embedded_hal::blocking::i2c::WriteRead for TempStructForI2cBorrowAvoidance<'a> {
+impl<'a> embedded_hal::blocking::i2c::WriteRead for I2cShare<'a> {
     type Error = esp32c3_hal::i2c::Error;
 
     fn write_read(
@@ -297,11 +244,16 @@ impl<'a> embedded_hal::blocking::i2c::WriteRead for TempStructForI2cBorrowAvoida
     }
 }
 
-struct TempStructForDelayBorrowAvoidance<'a> {
+struct DelayShare<'a> {
     delay_bit: &'a mut Delay,
 }
 
-impl<'a> DelayMs<u16> for TempStructForDelayBorrowAvoidance<'a> {
+impl<'a> DelayShare<'a> {
+    fn new(delay_bit: &'a mut Delay) -> Self {
+        Self { delay_bit }
+    }
+}
+impl<'a> DelayMs<u16> for DelayShare<'a> {
     fn delay_ms(&mut self, ms: u16) {
         self.delay_bit.delay_ms(ms)
     }
