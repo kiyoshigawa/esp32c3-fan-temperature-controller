@@ -148,6 +148,12 @@ fn main() -> ! {
             DelayShare::new(&mut temp_sensor_delay),
         );
 
+        // Set fan PWM channels to fan_speed:
+        pwm_channel_0.configure(pwm_config(fs)).ok();
+        pwm_channel_1.configure(pwm_config(fs)).ok();
+
+        println!("Temp: {:.2}C, Fan Speed: {:?}%", t, fs);
+
         // Print to Screen:
         let mut buffer_line_1 = [0_u8; 20];
         let mut buffer_line_2 = [0_u8; 20];
@@ -161,10 +167,6 @@ fn main() -> ! {
                 print_string_line_2,
             );
         }
-
-        // Set fan PWM channels to fan_speed:
-        pwm_channel_0.configure(pwm_config(fs)).ok();
-        pwm_channel_1.configure(pwm_config(fs)).ok();
 
         delay.delay_ms(10_000_u32);
     }
@@ -194,8 +196,7 @@ fn oled_write<'a, 'b>(i2c_share: I2cShare<'a>, line_1_str: &'b str, line_2_str: 
 
 fn read_temp(i2c_share: I2cShare, delay_share: DelayShare) -> (f32, u8) {
     let mut temp_sensor = AHT10::new(i2c_share, delay_share).expect(TEMP_SENSOR_INIT_ERROR);
-    let (h, t) = temp_sensor.read().expect(TEMP_SENSOR_ERROR);
-    println!("Temperature: {:?}C, Humidity: {:?}%", t.celsius(), h.rh());
+    let (_h, t) = temp_sensor.read().expect(TEMP_SENSOR_ERROR);
     let t_celsius = t.celsius();
     let fan_speed = match t.celsius() {
         t if t <= MIN_FAN_TEMP => 1,
@@ -206,17 +207,17 @@ fn read_temp(i2c_share: I2cShare, delay_share: DelayShare) -> (f32, u8) {
 }
 
 struct I2cShare<'a> {
-    i2c_bit: &'a mut esp_hal_common::i2c::I2C<I2C0>,
+    i2c_bit: &'a mut i2c::I2C<I2C0>,
 }
 
 impl<'a> I2cShare<'a> {
-    fn new(i2c_bit: &'a mut esp32c3_hal::i2c::I2C<I2C0>) -> Self {
+    fn new(i2c_bit: &'a mut i2c::I2C<I2C0>) -> Self {
         Self { i2c_bit }
     }
 }
 
 impl<'a> embedded_hal::blocking::i2c::Write for I2cShare<'a> {
-    type Error = esp32c3_hal::i2c::Error;
+    type Error = i2c::Error;
 
     fn write(&mut self, address: SevenBitAddress, bytes: &[u8]) -> Result<(), Self::Error> {
         self.i2c_bit.write(address, bytes)
@@ -224,7 +225,7 @@ impl<'a> embedded_hal::blocking::i2c::Write for I2cShare<'a> {
 }
 
 impl<'a> embedded_hal::blocking::i2c::Read for I2cShare<'a> {
-    type Error = esp32c3_hal::i2c::Error;
+    type Error = i2c::Error;
 
     fn read(&mut self, address: SevenBitAddress, buffer: &mut [u8]) -> Result<(), Self::Error> {
         self.i2c_bit.read(address, buffer)
@@ -232,7 +233,7 @@ impl<'a> embedded_hal::blocking::i2c::Read for I2cShare<'a> {
 }
 
 impl<'a> embedded_hal::blocking::i2c::WriteRead for I2cShare<'a> {
-    type Error = esp32c3_hal::i2c::Error;
+    type Error = i2c::Error;
 
     fn write_read(
         &mut self,
