@@ -13,6 +13,8 @@ esp-backtrace     = { version = "0.4.0", features = ["esp32c3", "panic-handler",
 esp-println       = { version = "0.3.0", features = ["esp32c3"] }
 embedded-graphics = "0.7.1"
 ssd1306           = "0.7.1"
+heapless          = "0.7.16"
+format_no_std     = "1.0.0"
 
 [dependencies.aht10]
 path = "../../aht10"
