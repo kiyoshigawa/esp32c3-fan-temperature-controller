@@ -17,7 +17,8 @@ heapless          = "0.7.16"
 format_no_std     = "1.0.0"
 
 [dependencies.aht10]
-path = "../../aht10"
+git = "https://github.com/andy31415/aht10"
+branch = "fix_status_check"
 
 [dependencies.esp-hal-common]
 git      = "https://github.com/esp-rs/esp-hal.git"
