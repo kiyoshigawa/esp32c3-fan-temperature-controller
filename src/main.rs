@@ -143,10 +143,7 @@ fn main() -> ! {
         wdt0.feed();
 
         // Read Temps:
-        let (t, fs) = read_temp(
-            I2cShare::new(&mut i2c),
-            DelayShare::new(&mut temp_sensor_delay),
-        );
+        let (t, fs) = read_temp(&mut i2c, &mut temp_sensor_delay);
 
         // Set fan PWM channels to fan_speed:
         pwm_channel_0.configure(pwm_config(fs)).ok();
@@ -160,19 +157,14 @@ fn main() -> ! {
         let print_string_line_1 = show(&mut buffer_line_1, format_args!("T: {:.2}C", t)).unwrap();
         let print_string_line_2 = show(&mut buffer_line_2, format_args!("FS: {:?}%", fs)).unwrap();
 
-        {
-            oled_write(
-                I2cShare::new(&mut i2c),
-                print_string_line_1,
-                print_string_line_2,
-            );
-        }
+        oled_write(&mut i2c, print_string_line_1, print_string_line_2);
 
         delay.delay_ms(10_000_u32);
     }
 }
 
-fn oled_write<'a, 'b>(i2c_share: I2cShare<'a>, line_1_str: &'b str, line_2_str: &'b str) {
+fn oled_write<'a, 'b>(i2c_ref: &'a mut i2c::I2C<I2C0>, line_1_str: &'b str, line_2_str: &'b str) {
+    let i2c_share = I2cShare::new(i2c_ref);
     let interface = I2CDisplayInterface::new(i2c_share);
     let mut oled_display = Ssd1306::new(interface, DisplaySize128x32, DisplayRotation::Rotate0)
         .into_buffered_graphics_mode();
@@ -194,7 +186,9 @@ fn oled_write<'a, 'b>(i2c_share: I2cShare<'a>, line_1_str: &'b str, line_2_str: 
     oled_display.flush().unwrap();
 }
 
-fn read_temp(i2c_share: I2cShare, delay_share: DelayShare) -> (f32, u8) {
+fn read_temp(i2c_ref: &mut i2c::I2C<I2C0>, delay_ref: &mut Delay) -> (f32, u8) {
+    let i2c_share = I2cShare::new(i2c_ref);
+    let delay_share = DelayShare::new(delay_ref);
     let mut temp_sensor = AHT10::new(i2c_share, delay_share).expect(TEMP_SENSOR_INIT_ERROR);
     let (_h, t) = temp_sensor.read().expect(TEMP_SENSOR_ERROR);
     let t_celsius = t.celsius();
