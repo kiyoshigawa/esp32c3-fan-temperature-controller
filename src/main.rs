@@ -102,14 +102,27 @@ fn main() -> ! {
     );
     ledc.set_global_slow_clock(LSGlobalClkSource::APBClk);
 
+    // Set up the i2c interface: SCL on pin 2, SDA on pin 3:
+    // If this works, we can display errors on the OLED screen
+    let mut i2c = i2c::I2C::new(
+        peripherals.I2C0,
+        io.pins.gpio3,
+        io.pins.gpio2,
+        100u32.kHz(),
+        &mut system.peripheral_clock_control,
+        &clocks,
+    )
+    .expect(I2C_INIT_ERROR);
+
     let mut pwm_timer = ledc.get_timer::<LowSpeed>(timer::Number::Timer2);
-    pwm_timer
-        .configure(TimerConfig {
-            duty: timer::config::Duty::Duty8Bit,
-            clock_source: timer::LSClockSource::APBClk,
-            frequency: 25u32.kHz(),
-        })
-        .expect(PWM_TIMER_CONFIG_ERROR);
+    match pwm_timer.configure(TimerConfig {
+        duty: timer::config::Duty::Duty8Bit,
+        clock_source: timer::LSClockSource::APBClk,
+        frequency: 25u32.kHz(),
+    }) {
+        Ok(_) => {}
+        Err(_) => pwm_timer_config_panic(&mut i2c),
+    }
 
     let mut pwm_channel_0 = ledc.get_channel(channel::Number::Channel0, led_pwm_pin_1);
     let mut pwm_channel_1 = ledc.get_channel(channel::Number::Channel1, led_pwm_pin_2);
@@ -127,17 +140,6 @@ fn main() -> ! {
 
     // Set up a delay for use in reading the AHT10 data:
     let mut temp_sensor_delay = Delay::new(&clocks);
-
-    // Set up the i2c interface: SCL on pin 2, SDA on pin 3:
-    let mut i2c = i2c::I2C::new(
-        peripherals.I2C0,
-        io.pins.gpio3,
-        io.pins.gpio2,
-        100u32.kHz(),
-        &mut system.peripheral_clock_control,
-        &clocks,
-    )
-    .expect(I2C_INIT_ERROR);
 
     loop {
         wdt0.feed();
@@ -189,8 +191,22 @@ fn oled_write<'a, 'b>(i2c_ref: &'a mut i2c::I2C<I2C0>, line_1_str: &'b str, line
 fn read_temp(i2c_ref: &mut i2c::I2C<I2C0>, delay_ref: &mut Delay) -> (f32, u8) {
     let i2c_share = I2cShare::new(i2c_ref);
     let delay_share = DelayShare::new(delay_ref);
-    let mut temp_sensor = AHT10::new(i2c_share, delay_share).expect(TEMP_SENSOR_INIT_ERROR);
-    let (_h, t) = temp_sensor.read().expect(TEMP_SENSOR_ERROR);
+    let temp_sensor_init_result = AHT10::new(i2c_share, delay_share);
+    if temp_sensor_init_result.is_err() {
+        // If there is an error, this will panic
+        temp_sensor_init_panic(i2c_ref);
+        // the compiler doesn't know it will panic, so this lets me use the i2c_ref again
+        return (0.0, 0);
+    }
+    let mut temp_sensor = temp_sensor_init_result.unwrap();
+    let temp_sensor_read_result = temp_sensor.read();
+    if temp_sensor_read_result.is_err() {
+        // If there is an error, this will panic
+        temp_sensor_read_panic(i2c_ref);
+        // the compiler doesn't know it will panic, so this lets me use the i2c_ref again
+        return (0.0, 0);
+    }
+    let (_h, t) = temp_sensor_read_result.unwrap();
     let t_celsius = t.celsius();
     let fan_speed = match t.celsius() {
         t if t <= MIN_FAN_TEMP => 1,
@@ -258,7 +274,19 @@ fn map(x: f32, in_min: f32, in_max: f32, out_min: f32, out_max: f32) -> f32 {
     (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min
 }
 
-static TEMP_SENSOR_ERROR: &str = "Unable to read temperature: program will now crash.";
-static TEMP_SENSOR_INIT_ERROR: &str = "Error initializing the temp_sensor: program will now crash.";
+fn pwm_timer_config_panic(i2c_ref: &mut i2c::I2C<I2C0>) {
+    oled_write(i2c_ref, "PWM init", "error");
+    panic!("Unable to configure PWM Timer: program will now crash.");
+}
+
+fn temp_sensor_init_panic(i2c_ref: &mut i2c::I2C<I2C0>) {
+    oled_write(i2c_ref, "AHT10 init", "error");
+    panic!("Error initializing the temp_sensor: program will now crash.");
+}
+
+fn temp_sensor_read_panic(i2c_ref: &mut i2c::I2C<I2C0>) {
+    oled_write(i2c_ref, "AHT10 read", "error");
+    panic!("Unable to read temperature: program will now crash.");
+}
+
 static I2C_INIT_ERROR: &str = "Unable to initialize I2C peripheral: program will now crash.";
-static PWM_TIMER_CONFIG_ERROR: &str = "Unable to configure PWM Timer: program will now crash.";
