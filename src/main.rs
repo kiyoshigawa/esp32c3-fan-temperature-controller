@@ -170,50 +170,52 @@ fn oled_write<'a, 'b>(i2c_ref: &'a mut i2c::I2C<I2C0>, line_1_str: &'b str, line
     let interface = I2CDisplayInterface::new(i2c_share);
     let mut oled_display = Ssd1306::new(interface, DisplaySize128x32, DisplayRotation::Rotate0)
         .into_buffered_graphics_mode();
-    oled_display.init().unwrap();
 
-    let text_style = MonoTextStyleBuilder::new()
-        .font(&FONT_9X15)
-        .text_color(BinaryColor::On)
-        .build();
+    if oled_display.init().is_ok() {
+        let text_style = MonoTextStyleBuilder::new()
+            .font(&FONT_9X15)
+            .text_color(BinaryColor::On)
+            .build();
 
-    Text::with_baseline(line_1_str, Point::zero(), text_style, Baseline::Top)
-        .draw(&mut oled_display)
-        .unwrap();
+        Text::with_baseline(line_1_str, Point::zero(), text_style, Baseline::Top)
+            .draw(&mut oled_display)
+            .unwrap();
 
-    Text::with_baseline(line_2_str, Point::new(0, 16), text_style, Baseline::Top)
-        .draw(&mut oled_display)
-        .unwrap();
+        Text::with_baseline(line_2_str, Point::new(0, 16), text_style, Baseline::Top)
+            .draw(&mut oled_display)
+            .unwrap();
 
-    oled_display.flush().unwrap();
+        oled_display.flush().unwrap();
+    } else {
+        oled_display_init_error(line_1_str, line_2_str);
+    }
 }
 
 fn read_temp(i2c_ref: &mut i2c::I2C<I2C0>, delay_ref: &mut Delay) -> (f32, u8) {
     let i2c_share = I2cShare::new(i2c_ref);
     let delay_share = DelayShare::new(delay_ref);
-    let temp_sensor_init_result = AHT10::new(i2c_share, delay_share);
-    if temp_sensor_init_result.is_err() {
-        // If there is an error, this will panic
+    if let Ok(mut temp_sensor) = AHT10::new(i2c_share, delay_share) {
+        if let Ok(temp_sensor_read_result) = temp_sensor.read() {
+            let (_h, t) = temp_sensor_read_result;
+            let t_celsius = t.celsius();
+            let fan_speed = match t.celsius() {
+                t if t <= MIN_FAN_TEMP => 1,
+                t if t >= MAX_FAN_TEMP => 100,
+                t => map(t, MIN_FAN_TEMP, MAX_FAN_TEMP, 1.1, 99.9) as u8,
+            };
+            (t_celsius, fan_speed)
+        } else {
+            // If there is an error in the read, this will panic
+            temp_sensor_read_panic(i2c_ref);
+            // the compiler doesn't know it will panic, so this lets me use the i2c_ref again
+            (0.0, 0)
+        }
+    } else {
+        // If there is an error in the initialization, this will panic
         temp_sensor_init_panic(i2c_ref);
         // the compiler doesn't know it will panic, so this lets me use the i2c_ref again
-        return (0.0, 0);
+        (0.0, 0)
     }
-    let mut temp_sensor = temp_sensor_init_result.unwrap();
-    let temp_sensor_read_result = temp_sensor.read();
-    if temp_sensor_read_result.is_err() {
-        // If there is an error, this will panic
-        temp_sensor_read_panic(i2c_ref);
-        // the compiler doesn't know it will panic, so this lets me use the i2c_ref again
-        return (0.0, 0);
-    }
-    let (_h, t) = temp_sensor_read_result.unwrap();
-    let t_celsius = t.celsius();
-    let fan_speed = match t.celsius() {
-        t if t <= MIN_FAN_TEMP => 1,
-        t if t >= MAX_FAN_TEMP => 100,
-        t => map(t, MIN_FAN_TEMP, MAX_FAN_TEMP, 1.1, 99.9) as u8,
-    };
-    (t_celsius, fan_speed)
 }
 
 struct I2cShare<'a> {
@@ -287,6 +289,14 @@ fn temp_sensor_init_panic(i2c_ref: &mut i2c::I2C<I2C0>) {
 fn temp_sensor_read_panic(i2c_ref: &mut i2c::I2C<I2C0>) {
     oled_write(i2c_ref, "AHT10 read", "error");
     panic!("Unable to read temperature: program will now crash.");
+}
+
+fn oled_display_init_error(line_1_str: &str, line_2_str: &str) {
+    println!("The OLED Was not able to initialize.");
+    println!(
+        "OLED Message was to be as follows:\r\n{:?}\r\n{:?}",
+        line_1_str, line_2_str
+    );
 }
 
 static I2C_INIT_ERROR: &str = "Unable to initialize I2C peripheral: program will now crash.";
